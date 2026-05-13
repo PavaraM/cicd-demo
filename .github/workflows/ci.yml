@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,3 +23,36 @@ jobs:
 
       - name: Run tests
         run: pytest -v
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test  # only runs if test job passes
+    if: github.ref == 'refs/heads/main'  # only on main branch, not PRs
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu
+            # Stop and remove old container if running
+            docker stop cicd-demo || true
+            docker rm cicd-demo || true
+            # Remove old image
+            docker rmi cicd-demo || true
+            # Clone or pull latest code
+            if [ -d "cicd-demo" ]; then
+              cd cicd-demo && git pull
+            else
+              git clone https://github.com/YOUR_USERNAME/cicd-demo.git
+              cd cicd-demo
+            fi
+            # Build and run
+            docker build -t cicd-demo .
+            docker run -d --name cicd-demo -p 5000:5000 cicd-demo
