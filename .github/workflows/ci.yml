@@ -50,7 +50,7 @@ jobs:
             if [ -d "cicd-demo" ]; then
               cd cicd-demo && git pull
             else
-              git clone https://github.com/YOUR_USERNAME/cicd-demo.git
+              git clone https://github.com/PavaraM/cicd-demo.git
               cd cicd-demo
             fi
             # Build and run
