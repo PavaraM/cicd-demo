@@ -1,4 +1,4 @@
-import pytest
+import pytest # type: ignore
 from app import app
 
 @pytest.fixture
