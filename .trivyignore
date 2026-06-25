@@ -1,0 +1,35 @@
+# Trivy ignore rules
+#
+# Format: CVE-ID (one per line), with optional expiry date as comment.
+# All entries are CVEs that currently have NO upstream fix in Debian trixie.
+# Re-evaluate on each weekly rebuild: drop entries whose "Fixed Version"
+# is no longer empty in the Trivy report.
+#
+# Last reviewed: 2026-06-25
+
+# ncurses — buffer overflow. No Debian fix available yet.
+#   Source: https://avd.aquasec.com/nvd/cve-2025-69720
+#   Recheck: 2026-07-15
+CVE-2025-69720
+
+# SQLite — memory corruption / heap overflow. No Debian fix available yet.
+#   Source: https://avd.aquasec.com/nvd/cve-2026-11822
+#   Source: https://avd.aquasec.com/nvd/cve-2026-11824
+#   Recheck: 2026-07-15
+CVE-2026-11822
+CVE-2026-11824
+
+# Perl — archive-tar / IO-Compress issues. No Debian fix available yet.
+#   Affects: perl-base in this image (no Perl app code).
+#   Sources:
+#     https://avd.aquasec.com/nvd/cve-2026-42496  (CRITICAL, fix_deferred)
+#     https://avd.aquasec.com/nvd/cve-2026-8376
+#     https://avd.aquasec.com/nvd/cve-2026-42497
+#     https://avd.aquasec.com/nvd/cve-2026-48962
+#     https://avd.aquasec.com/nvd/cve-2026-9538
+#   Recheck: 2026-07-15
+CVE-2026-42496
+CVE-2026-8376
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-9538
