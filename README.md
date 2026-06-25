@@ -76,6 +76,17 @@ graph LR
 - **pip cache** — `actions/cache@v4` restores pip cache between runs, keyed on `requirements.txt` hash
 - **Docker layer cache** — `docker/build-push-action` uses local buildx cache, shared across workflow runs
 
+### Supply Chain Security
+
+All third-party GitHub Actions are pinned to **immutable commit SHAs** instead of version tags:
+
+| Action | Pinned SHA |
+|--------|-----------|
+| `aquasecurity/trivy-action` | `57a97c7` (v0.35.0 — the only tag untouched by the March 2026 supply chain attack) |
+| `appleboy/ssh-action` | `029f5b4` (v1.0.3) |
+
+Git tags are mutable — an attacker can force-push a different commit to an existing tag. By pinning to a commit SHA, the workflow always runs the exact reviewed code, regardless of whether a tag is later moved or compromised.
+
 ---
 
 ## Docker
@@ -227,6 +238,7 @@ cicd-demo/
 | **Docker** | Multi-stage build, `HEALTHCHECK`, `.dockerignore`, layer caching, registry push/pull |
 | **Deploy strategies** | Blue-green with health-gated traffic swap and automatic rollback |
 | **Security** | Trivy vulnerability scanning at the dependency and container image levels |
+| **Supply chain security** | All actions pinned to commit SHAs (not mutable tags) — protection against tag hijacking attacks |
 | **Cloud (AWS)** | EC2 provisioning, security group config, SSH-based deployment |
 | **Pipeline performance** | pip caching, Docker layer caching, parallel job execution |
 | **Production readiness** | Health endpoint, JSON error handlers, CORS, structured tagging, zero-downtime deploys |
