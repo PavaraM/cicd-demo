@@ -17,7 +17,7 @@ def server_error(e):
 
 @app.route("/")
 def home():
-    return jsonify({"status": "ok", "message": "hello from cicd-demo"})
+    return jsonify({"status": "ok", "message": "hello from cicd-demo", "version": "2.0"})
 
 
 @app.route("/health")
