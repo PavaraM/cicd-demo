@@ -48,9 +48,9 @@ jobs:
             docker rmi cicd-demo || true
             # Clone or pull latest code
             if [ -d "cicd-demo" ]; then
-              cd cicd-demo && git pull
+              cd cicd-demo && git fetch origin main && git reset --hard origin/main
             else
-              git clone https://github.com/PavaraM/cicd-demo.git
+              git clone https://github.com/${{ github.repository }}.git
               cd cicd-demo
             fi
             # Build and run

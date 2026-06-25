@@ -1,2 +1,3 @@
-flask
-pytest
+flask>=3.0,<4.0
+pytest>=8.0,<9.0
+flask-cors>=5.0,<6.0
