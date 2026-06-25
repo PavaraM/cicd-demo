@@ -20,8 +20,10 @@ graph TD
     C --> F{All passing?}
     D --> F
     E --> F
-    F -->|Yes| G[build-and-push job]
-    G --> H[Build multi-stage image]
+    F -->|Yes + secrets set| G[build-and-push job]
+    G --> G1[Check Docker Hub secrets]
+    G1 -->|configured| H[Build multi-stage image]
+    G1 -->|missing| G2[skip - warn]
     H --> I[Push to Docker Hub]
     I --> J[Trivy scan image]
     J --> K{Image safe?}
@@ -61,7 +63,7 @@ graph LR
     end
     F -->|Yes| D[build-and-push]
     D --> E[trivy image scan]
-    E -->|Yes| G[deploy]
+    E -->|Yes + secrets| G[deploy]
 ```
 
 | Gate | Tool | What it catches |
@@ -70,6 +72,10 @@ graph LR
 | Tests | `pytest` | Functional correctness |
 | Dependency scan | `trivy fs` | CVEs in Python packages (HIGH/CRITICAL) |
 | Image scan | `trivy image` | CVEs in the final Docker image |
+
+### Graceful Degradation
+
+The `build-and-push` job does not fail if `DOCKER_USERNAME` / `DOCKER_PASSWORD` are not set — it emits a warning and skips the build. This lets forks and PR builds run end-to-end without exposing secrets. The job exposes a `pushed` output that the `deploy` job requires, so a skipped build also skips the deploy.
 
 ### Caching
 
@@ -87,6 +93,16 @@ All third-party GitHub Actions are pinned to **immutable commit SHAs** instead o
 
 Git tags are mutable — an attacker can force-push a different commit to an existing tag. By pinning to a commit SHA, the workflow always runs the exact reviewed code, regardless of whether a tag is later moved or compromised.
 
+### Vulnerability Exception Policy
+
+Some Debian trixie CVEs are accepted via [`.trivyignore`](./.trivyignore). Each entry has:
+
+- The CVE ID
+- A source link to the advisory
+- An expiry / re-check date
+
+The pipeline still scans and reports all findings; the ignore file just downgrades severity for documented, time-boxed exceptions. When Debian ships a fix, the entry should be removed and the next pipeline run will catch it.
+
 ---
 
 ## Docker
@@ -96,9 +112,11 @@ Git tags are mutable — an attacker can force-push a different commit to an exi
 | Stage | Base Image | Contents | Purpose |
 |-------|-----------|----------|---------|
 | `builder` | `python:3.12-slim` | Source + installed deps | Compile and assemble |
-| `runtime` | `python:3.12-slim` | Copied `site-packages` + app only | Minimal runtime image |
+| `runtime` | `python:3.12-slim` + `apt-get upgrade` | Copied `site-packages` + app only | Minimal runtime image with patched OS libs |
 
 The final image contains only what is needed at runtime — no build tools, no caches, no source history. This reduces attack surface and deploy time.
+
+The `runtime` stage runs `apt-get update && apt-get upgrade -y` to pull in patched versions of OS libraries at build time. This is defense in depth: even if the base image snapshot is stale, the latest fixes from Debian are applied.
 
 ### HEALTHCHECK
 
@@ -113,10 +131,12 @@ Docker marks the container `healthy` or `unhealthy` — the deploy script uses t
 
 | Tag | Format | Use |
 |-----|--------|-----|
-| Commit | `sha-<7-char-sha>` | Immutable, traceable to exact commit |
+| Commit | `sha-<full-40-char-sha>` | Immutable, traceable to exact commit |
 | Latest | `latest` | Updated on every `main` push |
 
-Images are pushed to **Docker Hub**: [`pavara/cicd-demo`](https://hub.docker.com/r/pavara/cicd-demo)
+Tags use the **full commit SHA** (40 chars), not the short form. Trivy, the deploy job, and Docker Hub all reference the same exact digest, so there is no chance of a tag mismatch between scan and deploy.
+
+Images are pushed to **Docker Hub**: [`pavaram/cicd-demo`](https://hub.docker.com/r/pavaram/cicd-demo)
 
 ---
 
@@ -135,7 +155,7 @@ graph LR
 
 The deploy script on EC2:
 
-1. Pulls `pavara/cicd-demo:sha-<commit>`
+1. Pulls `pavaram/cicd-demo:sha-<commit>`
 2. Starts a new container (`cicd-demo-blue`) on port **5001**
 3. Waits up to 60 seconds for the healthcheck to pass
 4. If healthy — stops the old container on port 5000, starts the new container on port 5000, removes the blue container
@@ -151,12 +171,14 @@ The deploy script on EC2:
 # 1. Fork this repo on GitHub
 # 2. Set these repository secrets:
 #    DOCKER_USERNAME     - Docker Hub username
-#    DOCKER_PASSWORD     - Docker Hub token (not your password)
+#    DOCKER_PASSWORD     - Docker Hub access token (not your password)
 #    EC2_HOST            - EC2 public IP
 #    EC2_USER            - usually "ubuntu"
 #    EC2_SSH_KEY         - private SSH key for EC2
 # 3. Push to main — the pipeline runs automatically
 ```
+
+> Without the Docker Hub secrets, the `quality` job still runs but `build-and-push` and `deploy` are skipped with a warning. The pipeline never fails on missing secrets — by design.
 
 ### EC2 Requirements
 
@@ -208,10 +230,10 @@ cicd-demo/
 ├── app.py                  # Flask app
 ├── test_app.py             # pytest tests
 ├── requirements.txt        # Pinned dependencies
-├── Dockerfile              # Multi-stage build
-├── Makefile                # Dev commands
+├── Dockerfile              # Multi-stage build with apt-get upgrade
 ├── .dockerignore           # Image exclusions
-├── .gitignore              # Git exclusions
+├── .trivyignore            # Time-boxed CVE exceptions for unfixed Debian CVEs
+├── Makefile                # Dev commands
 └── .github/workflows/
     └── ci.yml              # CI/CD pipeline (3 jobs, 5 quality gates)
 ```
@@ -222,11 +244,24 @@ cicd-demo/
 
 | Secret | Used by | Purpose |
 |--------|---------|---------|
-| `DOCKER_USERNAME` | `build-and-push` | Docker Hub login |
-| `DOCKER_PASSWORD` | `build-and-push` | Docker Hub access token |
+| `DOCKER_USERNAME` | `build-and-push` | Docker Hub login (e.g. `pavaram`) |
+| `DOCKER_PASSWORD` | `build-and-push` | Docker Hub access token (scope: Read, Write, Delete) |
 | `EC2_HOST` | `deploy` | EC2 public IP address |
 | `EC2_USER` | `deploy` | SSH username |
 | `EC2_SSH_KEY` | `deploy` | SSH private key |
+
+---
+
+## Pipeline bug-fix history
+
+Lessons baked into the current workflow configuration:
+
+| Symptom | Root cause | Fix |
+|---------|-----------|-----|
+| Build failed: `Unrecognized named-value: 'secrets'` in `if:` | GitHub Actions expressions don't allow `secrets.*` at the job-level `if` | Replaced top-level secret check with a `gate` step that exports `pushed=true|false`; downstream steps gate on it |
+| Push denied: `push access denied` | Docker Hub repo name mismatch (`pavara` vs `pavaram`) | Corrected `DOCKER_IMAGE` env var |
+| Trivy scan: `MANIFEST_UNKNOWN` | Image tagged with short SHA, scan referenced full SHA | Set metadata-action `format=long` so the pushed tag matches the scan/deploy ref exactly |
+| 11 HIGH/CRITICAL CVEs in base image | OS libs in `python:3.12-slim` were out of date | Added `apt-get upgrade` in runtime stage, plus `.trivyignore` for CVEs with no Debian fix yet |
 
 ---
 
@@ -234,10 +269,11 @@ cicd-demo/
 
 | Skill | Evidence in this project |
 |-------|--------------------------|
-| **CI/CD** | Multi-job GitHub Actions pipeline — quality gates, conditional deploys, caching |
-| **Docker** | Multi-stage build, `HEALTHCHECK`, `.dockerignore`, layer caching, registry push/pull |
+| **CI/CD** | Multi-job GitHub Actions pipeline — quality gates, conditional deploys, graceful secret handling, caching |
+| **Docker** | Multi-stage build, `HEALTHCHECK`, `.dockerignore`, layer caching, registry push/pull, runtime `apt-get upgrade` |
 | **Deploy strategies** | Blue-green with health-gated traffic swap and automatic rollback |
-| **Security** | Trivy vulnerability scanning at the dependency and container image levels |
+| **Security** | Trivy vulnerability scanning at the dependency and container image levels; SHA-pinned actions |
+| **Vulnerability management** | Time-boxed `.trivyignore` exceptions for unfixed upstream CVEs |
 | **Supply chain security** | All actions pinned to commit SHAs (not mutable tags) — protection against tag hijacking attacks |
 | **Cloud (AWS)** | EC2 provisioning, security group config, SSH-based deployment |
 | **Pipeline performance** | pip caching, Docker layer caching, parallel job execution |
