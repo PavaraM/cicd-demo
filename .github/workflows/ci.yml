@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  DOCKER_IMAGE: pavara/cicd-demo
+  DOCKER_IMAGE: pavaram/cicd-demo
   PYTHON_VERSION: "3.12"
 
 jobs:
